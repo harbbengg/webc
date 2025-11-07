@@ -1,0 +1,277 @@
+{% extends "accounts/base.html" %}
+{% load static %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h1>Dashboard</h1>
+        <p class="welcome-text">Connect, Recycle, Innovate. Welcome to P-Lament</p>
+    </div>
+
+    <div class="dashboard-content">
+        <div class="summary-section">
+            <h2 class="section-title">Summary</h2>
+             <div class="summary-item" style="border-left: 4px solid #1e40af; background: linear-gradient(135deg, #dbeafe, #93c5fd);">
+                <h3>Total App Users</h3>
+                <p>{{ total_users }}</p>
+            </div>
+            <div class="summary-item approved">
+                <h3>Approved Claims</h3>
+                <p>{{ total_approved_claims }}</p>
+            </div>
+           
+            <div class="summary-item denied">
+                <h3>Denied Claims</h3>
+                <p>{{ total_denied_claims }}</p>
+            </div>
+            <div class="summary-item pending">
+                <h3>Pending Claims</h3>
+                <p>{{ total_pending_claims }}</p>
+            </div>
+        </div>
+
+        <div class="graph-section">
+            <h2 class="section-title">Reward Distribution</h2>
+            <div class="graph-container">
+                <canvas id="rewardDistributionChart" style="max-height: 250px;"></canvas> 
+            </div>
+        </div>
+    </div>
+
+    <div class="requests-section">
+        <div class="section-header">
+            <h3 class="section-subtitle">Recent Activities</h3>
+            <div class="section-controls">
+                {% if processed_requests|length > 3 %}
+                <div class="view-toggle">
+                    <button id="showAllBtn" class="view-btn show-btn">
+                        <span class="btn-icon">↓</span>
+                        Show All
+                    </button>
+                    <button id="hideAllBtn" class="view-btn hide-btn" style="display: none;">
+                        <span class="btn-icon">↑</span>
+                        Show Less
+                    </button>
+                </div>
+                {% endif %}
+                <div class="search-container">
+                    <input type="text" id="searchInput" placeholder="Search by Redemption ID..." class="search-input">
+                </div>
+            </div>
+        </div>
+        
+        {% if processed_requests %}
+            <div id="recent-activities-container">
+                <div id="visible-activities">
+                    {% for request in processed_requests|slice:":3" %}
+                    <div class="claim-item" data-request-id="{{ request.id }}" data-unique-id="{{ request.unique_id }}">
+                        <div class="claim-info">
+                            <div class="claim-id">Redemption ID: {{ request.unique_id }}</div>
+                            <div class="claim-user">{{ request.user.get_full_name|default:request.user.username }}</div>
+                            <div class="claim-reward">Reward: {{ request.reward.name }} ({{ request.reward.cost }} points)</div>
+                            <div class="claim-date">
+                                Requested: {{ request.requested_at|date:"M d, Y H:i" }} | 
+                                Processed: {{ request.processed_at|date:"M d, Y H:i" }}
+                            </div>
+                            {% if request.reason %}
+                                <div class="points-info">Reason: {{ request.reason }}</div>
+                            {% endif %}
+                            {% if request.processed_by %}
+                                <div class="points-info">Processed by: {{ request.processed_by.get_full_name|default:request.processed_by.username }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="claim-actions">
+                            <span class="status-badge status-{{ request.status }}">{{ request.get_status_display }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                {% if processed_requests|length > 3 %}
+                <div id="hidden-activities" style="display: none;">
+                    {% for request in processed_requests|slice:"3:" %}
+                    <div class="claim-item" data-request-id="{{ request.id }}" data-unique-id="{{ request.unique_id }}">
+                        <div class="claim-info">
+                            <div class="claim-id">Redemption ID: {{ request.unique_id }}</div>
+                            <div class="claim-user">{{ request.user.get_full_name|default:request.user.username }}</div>
+                            <div class="claim-reward">Reward: {{ request.reward.name }} ({{ request.reward.cost }} points)</div>
+                            <div class="claim-date">
+                                Requested: {{ request.requested_at|date:"M d, Y H:i" }} | 
+                                Processed: {{ request.processed_at|date:"M d, Y H:i" }}
+                            </div>
+                            {% if request.reason %}
+                                <div class="points-info">Reason: {{ request.reason }}</div>
+                            {% endif %}
+                            {% if request.processed_by %}
+                                <div class="points-info">Processed by: {{ request.processed_by.get_full_name|default:request.processed_by.username }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="claim-actions">
+                            <span class="status-badge status-{{ request.status }}">{{ request.get_status_display }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            
+            <div id="noResults" class="no-results" style="display: none;">
+                <div class="no-results-content">
+                    <span class="no-results-icon">🔍</span>
+                    <p>No activities found matching your search.</p>
+                </div>
+            </div>
+        {% else %}
+            <div class="no-requests">No recent activities to display.</div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Dashboard loaded - initializing functionality');
+        
+        // --- NEW: Reward Distribution Chart.js Implementation ---
+        try {
+            // Parse data passed from Django context
+            const rewardLabels = JSON.parse('{{ reward_labels|safe }}');
+            const rewardCounts = JSON.parse('{{ reward_counts|safe }}');
+
+            if (rewardCounts.length > 0) {
+                const ctx = document.getElementById('rewardDistributionChart').getContext('2d');
+                
+                // Color palette matching your dashboard theme (Green, Blue, Yellow, Red)
+                const chartPalette = ['#5cb85c', '#5bc0de', '#f0ad4e', '#d9534f', '#62c462', '#49afcd']; 
+                
+                // Assign colors, cycling through the palette
+                const chartColors = rewardCounts.map((_, index) => {
+                    return chartPalette[index % chartPalette.length];
+                });
+
+                new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: rewardLabels,
+                        datasets: [{
+                            data: rewardCounts,
+                            backgroundColor: chartColors,
+                            borderWidth: 1,
+                            borderColor: '#fff' 
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 10
+                            }
+                        },
+                        tooltips: {
+                            callbacks: {
+                                label: function(tooltipItem, data) {
+                                    // Custom tooltip for count and percentage
+                                    const dataset = data.datasets[tooltipItem.datasetIndex];
+                                    const total = dataset.data.reduce((acc, val) => acc + val, 0);
+                                    const currentValue = dataset.data[tooltipItem.index];
+                                    const percentage = Math.round((currentValue / total) * 100);
+                                    return data.labels[tooltipItem.index] + ': ' + currentValue + ' claims (' + percentage + '%)';
+                                }
+                            }
+                        }
+                    }
+                });
+            } else {
+                // Display message if no claims have been approved
+                const graphContainer = document.querySelector('.graph-section .graph-container');
+                if (graphContainer) {
+                    graphContainer.innerHTML = '<p style="text-align: center; padding: 50px; color: #999;">No rewards have been approved yet to calculate distribution.</p>';
+                }
+            }
+        } catch (error) {
+            console.error("Error initializing Reward Distribution Chart:", error);
+        }
+        // --- END NEW CHART CODE ---
+        
+        // Note: The original manual SVG chart code for 'User Registrations' 
+        // has been removed, as the section was replaced.
+
+        // --- EXISTING: Show/Hide All functionality ---
+        const showAllBtn = document.getElementById('showAllBtn');
+        const hideAllBtn = document.getElementById('hideAllBtn');
+        const hiddenActivities = document.getElementById('hidden-activities');
+        const visibleActivities = document.getElementById('visible-activities');
+        const searchInput = document.getElementById('searchInput');
+        const noResults = document.getElementById('noResults');
+        const recentActivitiesContainer = document.getElementById('recent-activities-container');
+
+        if (showAllBtn && hiddenActivities) {
+            showAllBtn.addEventListener('click', function() {
+                hiddenActivities.style.display = 'block';
+                showAllBtn.style.display = 'none';
+                hideAllBtn.style.display = 'flex';
+                setTimeout(() => {
+                    hiddenActivities.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, 100);
+            });
+
+            hideAllBtn.addEventListener('click', function() {
+                hiddenActivities.style.display = 'none';
+                showAllBtn.style.display = 'flex';
+                hideAllBtn.style.display = 'none';
+                setTimeout(() => {
+                    visibleActivities.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+            });
+        }
+
+        // --- EXISTING: Search functionality ---
+        if (searchInput) {
+            searchInput.addEventListener('input', function() {
+                const searchTerm = this.value.trim().toLowerCase();
+                const allClaimItems = document.querySelectorAll('.claim-item');
+                let hasVisibleItems = false;
+
+                allClaimItems.forEach(item => {
+                    const claimId = item.querySelector('.claim-id').textContent.toLowerCase();
+                    const uniqueId = item.getAttribute('data-unique-id').toLowerCase();
+                    
+                    if (claimId.includes(searchTerm) || uniqueId.includes(searchTerm) || searchTerm === '') {
+                        item.style.display = 'flex';
+                        hasVisibleItems = true;
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+
+                if (searchTerm !== '' && !hasVisibleItems) {
+                    noResults.style.display = 'block';
+                    if (recentActivitiesContainer) recentActivitiesContainer.style.display = 'none';
+                } else {
+                    noResults.style.display = 'none';
+                    if (recentActivitiesContainer) recentActivitiesContainer.style.display = 'block';
+                }
+
+                if (searchTerm !== '' && hiddenActivities) {
+                    hiddenActivities.style.display = 'block';
+                    if (showAllBtn) showAllBtn.style.display = 'none';
+                    if (hideAllBtn) hideAllBtn.style.display = 'flex';
+                }
+            });
+
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    this.value = '';
+                    this.dispatchEvent(new Event('input'));
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

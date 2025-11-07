@@ -5,10 +5,8 @@ from django.contrib.auth import logout
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
-from .models import Profile
-from .models import Reward
-from .models import ClaimRequest
-from .forms import RewardForm  # We'll create this next
+from .models import Profile, Reward, ClaimRequest, EmailOTP, PasswordResetOTP, OTP
+from .forms import RewardForm
 from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.core.files.base import ContentFile
@@ -21,52 +19,40 @@ import re
 import json
 from django.db import models
 from django.utils.timezone import now
-from datetime import timedelta
-from datetime import datetime 
+from datetime import timedelta, datetime
 from django.core.mail import send_mail
 from django.conf import settings
-from .serializers import RewardSerializer  # Make sure this import is at the top
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework.decorators import api_view
-from .models import Reward
 from .serializers import RewardSerializer
-from django.db.models import Q
-from django.contrib.auth import authenticate, login
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from django.db.models import Q, Count
 from django.middleware.csrf import get_token
 from django.db.models.functions import TruncMonth
-from django.db.models import Count
 from django.template.defaulttags import register
 from rest_framework.views import APIView
 from rest_framework import status
 from .utils import generate_and_send_otp
-from .models import EmailOTP
-from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.views import View
 import random
-from .models import OTP
-from django.contrib.auth.hashers import check_password
+from django.contrib.auth.hashers import check_password, make_password
 from django.core.exceptions import ObjectDoesNotExist
-from .models import PasswordResetOTP
-from rest_framework import generics
-from rest_framework import serializers
-from django.contrib.auth.hashers import make_password
-from .serializers import SendOTPSerializer, VerifyOTPSerializer, ResetPasswordSerializer
-from .models import PasswordResetOTP
+from rest_framework import generics, serializers
+from .serializers import SendOTPSerializer, VerifyOTPSerializer, ResetPasswordSerializer, ForgotPasswordOTPSerializer, VerifyForgotPasswordOTPSerializer
 from django.contrib.auth import get_user_model
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from .serializers import ForgotPasswordOTPSerializer, VerifyForgotPasswordOTPSerializer
+from django.utils import timezone  # <-- 🌟 REQUIRED FIX: Added timezone import
+from random import randint # <-- 🌟 REQUIRED FIX: Added randint import
 
-
+# --- Global/Constants ---
 OTP_STORE = {} 
-
 User = get_user_model()
+# ------------------------
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def send_forgot_password_otp(request):
+    """(Kept this API function but it is redundant with SendOTPView below)"""
     serializer = ForgotPasswordOTPSerializer(data=request.data)
     if serializer.is_valid():
         email = serializer.validated_data['email']
@@ -79,7 +65,8 @@ def send_forgot_password_otp(request):
         code = str(random.randint(100000, 999999))
         expires_at = timezone.now() + timezone.timedelta(minutes=10)
 
-        # Save OTP
+        # Save OTP - Use get_or_create to avoid multiple codes for the same user if necessary
+        PasswordResetOTP.objects.filter(user=user).update(is_used=True) # Invalidate old codes
         PasswordResetOTP.objects.create(user=user, code=code, expires_at=expires_at)
 
         # Send email
@@ -94,133 +81,16 @@ def send_forgot_password_otp(request):
         return Response({'success': True, 'message': 'OTP sent to your email'})
     return Response(serializer.errors, status=400)
 
-@csrf_exempt
-def reset_password(request):
-    if request.method != "POST":
-        return JsonResponse({"message": "Invalid request method"}, status=405)
+# --- DUPLICATE FUNCTION REMOVED: def reset_password(request) ---
 
-    try:
-        data = json.loads(request.body.decode("utf-8"))
-        print("📩 Incoming reset-password data:", data)  # Debugging line
+# --- DUPLICATE CLASS REMOVED: class ForgotPasswordView(APIView) ---
 
-        email = data.get("email")
-        otp = data.get("otp")
-        new_password = data.get("new_password")
+# --- Cleaned-up Serializers (assuming they are in serializers.py) ---
+# class ResetPasswordSerializer(serializers.Serializer): ... (Removed duplicate definition)
 
-        if not email or not otp or not new_password:
-            print("⚠️ Missing field(s)")
-            return JsonResponse({"message": "Missing required fields"}, status=400)
+# --- DUPLICATE CLASS REMOVED: @method_decorator(csrf_exempt, name='dispatch') class ResetPasswordView(View) ---
 
-        # --- Optional: Validate OTP ---
-        # For example, if you have OTP model:
-        # if not OTP.objects.filter(email=email, code=otp, is_used=False).exists():
-        #     print("❌ Invalid OTP")
-        #     return JsonResponse({"message": "Invalid OTP"}, status=400)
-
-        user = User.objects.get(email=email)
-        user.password = make_password(new_password)
-        user.save()
-
-        print("✅ Password reset successful for:", email)
-        return JsonResponse({"message": "Password reset successful"}, status=200)
-
-    except User.DoesNotExist:
-        print("❌ User not found:", email)
-        return JsonResponse({"message": "User not found"}, status=404)
-
-    except json.JSONDecodeError:
-        print("❌ JSON decode error")
-        return JsonResponse({"message": "Invalid JSON"}, status=400)
-
-    except Exception as e:
-        print("❌ Reset password error:", e)
-        return JsonResponse({"message": str(e)}, status=400)
-    
-class ForgotPasswordView(APIView):
-    def post(self, request):
-        email = request.data.get('email')
-        if not email:
-            return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return Response({"error": "No account associated with this email"}, status=status.HTTP_404_NOT_FOUND)
-
-        # Generate OTP
-        otp_code = str(randint(100000, 999999))
-        expires_at = timezone.now() + timedelta(minutes=10)
-        PasswordResetOTP.objects.create(user=user, code=otp_code, expires_at=expires_at)
-
-        # Send OTP via email
-        send_mail(
-            'Password Reset OTP',
-            f'Your password reset OTP is {otp_code}. It expires in 10 minutes.',
-            'noreply@yourapp.com',
-            [email],
-        )
-
-        return Response({"message": "OTP sent successfully"}, status=status.HTTP_200_OK)
-    
- 
-class ResetPasswordSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    otp = serializers.CharField(max_length=6)
-    new_password = serializers.CharField(min_length=8, write_only=True)
-
-    def validate(self, data):
-        try:
-            user = User.objects.get(email=data['email'])
-        except User.DoesNotExist:
-            raise serializers.ValidationError({"email": "User does not exist"})
-
-        otp_obj = PasswordResetOTP.objects.filter(user=user, code=data['otp']).last()
-        if not otp_obj:
-            raise serializers.ValidationError({"otp": "Invalid OTP"})
-        if otp_obj.is_expired():
-            raise serializers.ValidationError({"otp": "OTP expired"})
-
-        data['user'] = user
-        data['otp_obj'] = otp_obj
-        return data
-
-    def save(self):
-        user = self.validated_data['user']
-        new_password = self.validated_data['new_password']
-        user.set_password(new_password)
-        user.save()
-        # Optionally, delete used OTP
-        self.validated_data['otp_obj'].delete()
-        return user
-    
-@method_decorator(csrf_exempt, name='dispatch')
-class ResetPasswordView(View):
-    def post(self, request):
-        try:
-            data = json.loads(request.body.decode("utf-8"))
-            print("📩 Incoming reset-password data:", data)
-
-            email = data.get("email")
-            otp = data.get("otp")
-            new_password = data.get("new_password")
-
-            if not email or not otp or not new_password:
-                return JsonResponse({"message": "Missing fields"}, status=400)
-
-            # Optional: validate OTP here
-
-            user = User.objects.get(email=email)
-            user.password = make_password(new_password)
-            user.save()
-
-            return JsonResponse({"message": "Password reset successful"}, status=200)
-
-        except User.DoesNotExist:
-            return JsonResponse({"message": "User not found"}, status=404)
-        except Exception as e:
-            print("❌ Reset password error:", e)
-            return JsonResponse({"message": str(e)}, status=400)
- 
+# 1️⃣ Send OTP (APIView Standard)
 @method_decorator(csrf_exempt, name='dispatch')
 class SendOTPView(APIView):
     def post(self, request):
@@ -232,7 +102,9 @@ class SendOTPView(APIView):
             except User.DoesNotExist:
                 return Response({"message": "User not found"}, status=status.HTTP_404_NOT_FOUND)
 
+            # NOTE: Assuming PasswordResetOTP.generate_otp() exists and handles random/expiry
             code = PasswordResetOTP.generate_otp()
+            PasswordResetOTP.objects.filter(user=user).update(is_used=True) # Invalidate old codes
             PasswordResetOTP.objects.create(user=user, code=code)
             
             # Here you can send the OTP via email
@@ -242,7 +114,7 @@ class SendOTPView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# 2️⃣ Verify OTP
+# 2️⃣ Verify OTP (APIView Standard)
 @method_decorator(csrf_exempt, name='dispatch')
 class VerifyOTPView(APIView):
     def post(self, request):
@@ -252,7 +124,7 @@ class VerifyOTPView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# 3️⃣ Reset Password
+# 3️⃣ Reset Password (APIView Standard - KEPT THIS DEFINITION)
 @method_decorator(csrf_exempt, name='dispatch')
 class ResetPasswordView(APIView):
     def post(self, request):
@@ -276,6 +148,8 @@ class RequestOTPView(APIView):
         generate_and_send_otp(user)
 
         return Response({"message": f"OTP sent to {email}"}, status=status.HTTP_200_OK)
+
+# --- Standard Django/JSON Views ---
 
 @csrf_exempt
 def signup(request):
@@ -475,7 +349,7 @@ def api_claim_reward(request):
             'success': True, 
             'message': 'Claim request submitted successfully. Please wait for admin approval.',
             'claim_id': claim_request.id,
-            'unique_id': claim_request.unique_id  # Add this line
+            'unique_id': claim_request.unique_id
         })
     except Reward.DoesNotExist:
         return JsonResponse({'success': False, 'message': 'Reward not found'}, status=404)
@@ -529,7 +403,7 @@ def api_get_profile(request):
                 'birth_date': profile.birth_date.isoformat() if profile.birth_date else None,
                 'profile_pic': request.build_absolute_uri(profile.profile_pic.url) if profile.profile_pic else None,
                 'points': profile.points,
-                'signup_source': profile.signup_source  # Include in response
+                'signup_source': profile.signup_source
             }
         }
         
@@ -634,7 +508,6 @@ def approve_claim_request(request, claim_id):
             # Get the claim by date from the form
             claim_by_date_str = request.POST.get('claim_by_date')
             if claim_by_date_str:
-                from datetime import datetime
                 claim_by_date = datetime.strptime(claim_by_date_str, '%Y-%m-%d').date()
             else:
                 # Default to 30 days from now if no date provided
@@ -1056,10 +929,10 @@ def api_login(request):
 @require_http_methods(["POST"])
 def api_update_profile(request):
     try:
-        print("Raw request body:", request.body)  # Log raw incoming data
+        print("Raw request body:", request.body)
         
         data = json.loads(request.body)
-        print("Parsed JSON data:", data)  # Log parsed data
+        print("Parsed JSON data:", data)
         
         user_id = data.get('user_id')
         
@@ -1069,7 +942,6 @@ def api_update_profile(request):
         user = User.objects.get(id=user_id)
         profile = user.profile
         
-        # Log current data before update
         print("Current user data:", {
             'first_name': user.first_name,
             'last_name': user.last_name,
@@ -1108,7 +980,6 @@ def api_update_profile(request):
         # Save profile changes
         profile.save()
         
-        # Log updated data
         print("Updated user data:", {
             'first_name': user.first_name,
             'last_name': user.last_name,
@@ -1245,16 +1116,7 @@ def upload_profile_pic(request):
     return JsonResponse({'success': False, 'message': 'Invalid request method'}, status=405)
 
 
-
-
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.contrib.auth.models import User
-import json
-from random import randint
-
 # Temporary global variable to store the last count from IR sensor
-# (In real deployment, you’d store this in a DB or Redis)
 last_bottle_count = 0
 
 @csrf_exempt
@@ -1274,10 +1136,7 @@ def api_receive_count(request):
     return JsonResponse({"success": False, "message": "Invalid method"}, status=405)
 
 
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.utils import timezone
-from .models import Profile, BottleCount, User
+from .models import BottleCount
 
 @csrf_exempt
 def update_bottle_count(request):
@@ -1341,7 +1200,7 @@ def verify_otp(request):
     try:
         data = json.loads(request.body)
         email = data.get('email')
-        otp_code = str(data.get('otp')).strip()  # convert to string and remove spaces
+        otp_code = str(data.get('otp')).strip()
 
         print(f"📩 Received email: {email}")
         print(f"🔢 Received OTP: {otp_code}")

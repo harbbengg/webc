@@ -25,7 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-1mi80#g&ml8(^l(6ka^zzlj%t7d^1j^s@9k7&wyzknf97lrvzu'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False  # Changed to False for production
+DEBUG = False
 
 ALLOWED_HOSTS = [
     'webc-production.up.railway.app',
@@ -54,6 +54,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Moved up
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -61,7 +62,6 @@ MIDDLEWARE = [
     'accounts.middleware.UpdateLastActiveMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # Removed duplicate security middleware
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -138,17 +138,11 @@ STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static'),
 ]
 
-# WhiteNoise configuration for static files
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# WhiteNoise configuration - Use simpler storage to avoid manifest issues
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 
 # Email Configuration for OTP
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'p.lament.2025.c@gmail.com'
-EMAIL_HOST_PASSWORD = 'gagp bgat tlcn woen'
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # Changed to console for now
 
 # OTP Settings
 OTP_EMAIL_SUBJECT = 'Your OTP Code'
@@ -165,8 +159,8 @@ LOGIN_REDIRECT_URL = 'dashboard'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Security Settings for Production
-SECURE_SSL_REDIRECT = True  # Redirect all HTTP to HTTPS
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # For Railway proxy
+SECURE_SSL_REDIRECT = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # CSRF Settings
 CSRF_TRUSTED_ORIGINS = [
@@ -176,12 +170,10 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000",
 ]
 
-CSRF_COOKIE_SECURE = True  # Changed to True for HTTPS
-SESSION_COOKIE_SECURE = True  # Changed to True for HTTPS
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_HTTPONLY = True  # Changed to True for security
-SESSION_COOKIE_HTTPONLY = True  # Added for security
 
 # CORS Settings
 CORS_ALLOWED_ORIGINS = [
@@ -192,7 +184,6 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = False  # Disabled for security - use specific origins above
 
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -219,21 +210,12 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
     ],
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
-    ],
-    'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
-    ]
 }
 
 # Security headers
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
-
-# For production error handling
-ADMINS = [('Your Name', 'p.lament.2025.c@gmail.com')]
 
 # Logging configuration for production
 LOGGING = {
@@ -246,6 +228,6 @@ LOGGING = {
     },
     'root': {
         'handlers': ['console'],
-        'level': 'WARNING',
+        'level': 'INFO',
     },
 }

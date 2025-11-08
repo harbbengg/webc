@@ -15,11 +15,8 @@ import os
 import pymysql
 pymysql.install_as_MySQLdb()
 
-
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
@@ -28,10 +25,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-1mi80#g&ml8(^l(6ka^zzlj%t7d^1j^s@9k7&wyzknf97lrvzu'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False  # Changed to False for production
 
-ALLOWED_HOSTS = ['webpla-production.up.railway.app', 'localhost', '127.0.0.1', 'webc-production.up.railway.app']
-
+ALLOWED_HOSTS = [
+    'webc-production.up.railway.app',
+    '.railway.app',  # Allows all Railway subdomains
+    'localhost', 
+    '127.0.0.1'
+]
 
 # Application definition
 
@@ -60,11 +61,8 @@ MIDDLEWARE = [
     'accounts.middleware.UpdateLastActiveMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Removed duplicate security middleware
 ]
-
-
 
 ROOT_URLCONF = 'core.urls'
 
@@ -93,7 +91,6 @@ AUTHENTICATION_BACKENDS = [
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
@@ -104,8 +101,6 @@ DATABASES = {
         'PORT': '38478',
     }
 }
-
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
@@ -131,10 +126,7 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'Asia/Manila'
-USE_TZ = True
-
 USE_I18N = True
-
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
@@ -146,27 +138,22 @@ STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static'),
 ]
 
+# WhiteNoise configuration for static files
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Email Configuration for OTP
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_USE_SSL = False
-EMAIL_HOST_USER = 'p.lament.2025.c@gmail.com'  # your Gmail
-EMAIL_HOST_PASSWORD = 'gagp bgat tlcn woen'  # Gmail app password
+EMAIL_HOST_USER = 'p.lament.2025.c@gmail.com'
+EMAIL_HOST_PASSWORD = 'gagp bgat tlcn woen'
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
-
-
 
 # OTP Settings
 OTP_EMAIL_SUBJECT = 'Your OTP Code'
 OTP_EMAIL_BODY_TEMPLATE = 'Your OTP code is: {otp_code}. It will expire in 10 minutes.'
 OTP_VALIDITY = 600  # 10 minutes in seconds
-
-# Media files
-STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Authentication settings
 LOGIN_URL = 'login'
@@ -177,30 +164,35 @@ LOGIN_REDIRECT_URL = 'dashboard'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# CORS Settings - Allow all origins for React Native development
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+# Security Settings for Production
+SECURE_SSL_REDIRECT = True  # Redirect all HTTP to HTTPS
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')  # For Railway proxy
 
-# Development CORS settings - Allow any IP for React Native
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:8000",
-    "https://webpla-production.up.railway.app",
-
-]
-
-# CSRF Settings - Relaxed for development
+# CSRF Settings
 CSRF_TRUSTED_ORIGINS = [
+    "https://webc-production.up.railway.app",
+    "https://*.railway.app",
     "http://localhost:3000",
     "http://localhost:8000",
-    "https://webpla-production.up.railway.app",
 ]
 
-CSRF_COOKIE_SECURE = False  # Set to False for HTTP development
+CSRF_COOKIE_SECURE = True  # Changed to True for HTTPS
+SESSION_COOKIE_SECURE = True  # Changed to True for HTTPS
 CSRF_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_HTTPONLY = False  # Allow React Native to access CSRF token
-SESSION_COOKIE_SECURE = False  # Set to False for HTTP development
 SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = True  # Changed to True for security
+SESSION_COOKIE_HTTPONLY = True  # Added for security
+
+# CORS Settings
+CORS_ALLOWED_ORIGINS = [
+    "https://webc-production.up.railway.app",
+    "https://*.railway.app",
+    "http://localhost:3000",
+    "http://localhost:8000",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = False  # Disabled for security - use specific origins above
 
 CORS_ALLOW_METHODS = [
     'DELETE',
@@ -226,5 +218,34 @@ CORS_ALLOW_HEADERS = [
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
     ]
+}
+
+# Security headers
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+
+# For production error handling
+ADMINS = [('Your Name', 'p.lament.2025.c@gmail.com')]
+
+# Logging configuration for production
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'WARNING',
+    },
 }
